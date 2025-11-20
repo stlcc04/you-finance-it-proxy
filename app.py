@@ -1,0 +1,127 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import requests, xmltodict, os
+from dotenv import load_dotenv
+
+app = Flask(__name__)
+CORS(app)
+load_dotenv()
+
+DART_KEY = os.getenv("DART_API_KEY")
+
+# -------------------------
+# 🔹 Helper: DART XML 호출
+# -------------------------
+def fetch_dart_data(corp_code, bsns_year, reprt_code="11013"):
+    url = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.xml"
+    params = {
+        "crtfc_key": DART_KEY,
+        "corp_code": corp_code,
+        "bsns_year": bsns_year,
+        "reprt_code": reprt_code
+    }
+    res = requests.get(url, params=params)
+    if res.status_code != 200:
+        return None
+    return xmltodict.parse(res.text)
+
+# -------------------------
+# 🔹 Helper: 주요 항목 추출
+# -------------------------
+def extract_financials(data):
+    items = data.get("result", {}).get("list", [])
+    summary = {}
+    for item in items:
+        name = item.get("account_nm")
+        value = item.get("thstrm_amount")
+        if not name or not value:
+            continue
+        summary[name.strip()] = float(value.replace(",", "")) if value.replace(",", "").isdigit() else 0
+    return summary
+
+# -------------------------
+# 🔹 Helper: 재무비율 계산
+# -------------------------
+def calculate_ratios(f):
+    try:
+        ratios = {
+            "영업이익률": round(f.get("영업이익", 0) / f.get("매출액", 1) * 100, 2),
+            "순이익률": round(f.get("당기순이익", 0) / f.get("매출액", 1) * 100, 2),
+            "부채비율": round(f.get("부채총계", 0) / f.get("자본총계", 1) * 100, 2),
+            "ROE": round(f.get("당기순이익", 0) / f.get("자본총계", 1) * 100, 2)
+        }
+        return ratios
+    except Exception as e:
+        return {"error": str(e)}
+
+# -------------------------
+# 🧮 /dart - 원본 데이터 조회
+# -------------------------
+@app.route("/dart")
+def get_dart():
+    corp_code = request.args.get("corp_code")
+    bsns_year = request.args.get("bsns_year")
+    reprt_code = request.args.get("reprt_code", "11013")
+
+    if not corp_code or not bsns_year:
+        return jsonify({"error": "Missing parameters"}), 400
+
+    data = fetch_dart_data(corp_code, bsns_year, reprt_code)
+    if not data:
+        return jsonify({"error": "Failed to retrieve DART data"}), 500
+
+    return jsonify(data)
+
+# -------------------------
+# 📊 /ratios - 재무비율 계산
+# -------------------------
+@app.route("/ratios")
+def get_ratios():
+    corp_code = request.args.get("corp_code")
+    bsns_year = request.args.get("bsns_year")
+    reprt_code = request.args.get("reprt_code", "11013")
+
+    data = fetch_dart_data(corp_code, bsns_year, reprt_code)
+    if not data:
+        return jsonify({"error": "No data"}), 500
+
+    f = extract_financials(data)
+    ratios = calculate_ratios(f)
+    return jsonify({"corp_code": corp_code, "year": bsns_year, "ratios": ratios, "financials": f})
+
+# -------------------------
+# ⚖️ /compare - 기업비교
+# -------------------------
+@app.route("/compare")
+def compare():
+    corp1 = request.args.get("corp1")
+    corp2 = request.args.get("corp2")
+    year = request.args.get("year", "2025")
+
+    if not corp1 or not corp2:
+        return jsonify({"error": "Missing corp codes"}), 400
+
+    d1 = fetch_dart_data(corp1, year)
+    d2 = fetch_dart_data(corp2, year)
+
+    if not d1 or not d2:
+        return jsonify({"error": "Failed to fetch data"}), 500
+
+    f1, f2 = extract_financials(d1), extract_financials(d2)
+    r1, r2 = calculate_ratios(f1), calculate_ratios(f2)
+
+    return jsonify({
+        "year": year,
+        "company_1": {"corp_code": corp1, "ratios": r1, "financials": f1},
+        "company_2": {"corp_code": corp2, "ratios": r2, "financials": f2}
+    })
+
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "You Finance It – Proxy v2",
+        "endpoints": ["/dart", "/ratios", "/compare"]
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
