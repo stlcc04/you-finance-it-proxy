@@ -9,11 +9,11 @@ load_dotenv()
 
 DART_KEY = os.getenv("DART_API_KEY")
 
-# -------------------------
-# 🔹 Helper: DART XML 호출
-# -------------------------
+# ----------------------------------------
+# 🔹 DART API 호출 (v3: fnlttMultiAcnt.xml)
+# ----------------------------------------
 def fetch_dart_data(corp_code, bsns_year, reprt_code="11013"):
-    url = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.xml"
+    url = "https://opendart.fss.or.kr/api/fnlttMultiAcnt.xml"
     params = {
         "crtfc_key": DART_KEY,
         "corp_code": corp_code,
@@ -25,23 +25,26 @@ def fetch_dart_data(corp_code, bsns_year, reprt_code="11013"):
         return None
     return xmltodict.parse(res.text)
 
-# -------------------------
-# 🔹 Helper: 주요 항목 추출
-# -------------------------
+# ----------------------------------------
+# 🔹 주요 항목 추출
+# ----------------------------------------
 def extract_financials(data):
-    items = data.get("result", {}).get("list", [])
-    summary = {}
-    for item in items:
-        name = item.get("account_nm")
-        value = item.get("thstrm_amount")
-        if not name or not value:
-            continue
-        summary[name.strip()] = float(value.replace(",", "")) if value.replace(",", "").isdigit() else 0
-    return summary
+    try:
+        items = data.get("result", {}).get("list", [])
+        f = {}
+        for item in items:
+            name = item.get("account_nm")
+            if not name:
+                continue
+            th = item.get("thstrm_amount", "0").replace(",", "")
+            f[name.strip()] = float(th) if th.isdigit() else 0
+        return f
+    except Exception as e:
+        return {}
 
-# -------------------------
-# 🔹 Helper: 재무비율 계산
-# -------------------------
+# ----------------------------------------
+# 🔹 비율 계산
+# ----------------------------------------
 def calculate_ratios(f):
     try:
         ratios = {
@@ -51,77 +54,17 @@ def calculate_ratios(f):
             "ROE": round(f.get("당기순이익", 0) / f.get("자본총계", 1) * 100, 2)
         }
         return ratios
-    except Exception as e:
-        return {"error": str(e)}
+    except:
+        return {"error": "비율 계산 실패"}
 
-# -------------------------
-# 🧮 /dart - 원본 데이터 조회
-# -------------------------
-@app.route("/dart")
-def get_dart():
-    corp_code = request.args.get("corp_code")
-    bsns_year = request.args.get("bsns_year")
-    reprt_code = request.args.get("reprt_code", "11013")
-
-    if not corp_code or not bsns_year:
-        return jsonify({"error": "Missing parameters"}), 400
-
-    data = fetch_dart_data(corp_code, bsns_year, reprt_code)
-    if not data:
-        return jsonify({"error": "Failed to retrieve DART data"}), 500
-
-    return jsonify(data)
-
-# -------------------------
-# 📊 /ratios - 재무비율 계산
-# -------------------------
+# ----------------------------------------
+# 🧩 /ratios - 주요 재무비율 반환
+# ----------------------------------------
 @app.route("/ratios")
 def get_ratios():
     corp_code = request.args.get("corp_code")
     bsns_year = request.args.get("bsns_year")
     reprt_code = request.args.get("reprt_code", "11013")
 
-    data = fetch_dart_data(corp_code, bsns_year, reprt_code)
-    if not data:
-        return jsonify({"error": "No data"}), 500
-
-    f = extract_financials(data)
-    ratios = calculate_ratios(f)
-    return jsonify({"corp_code": corp_code, "year": bsns_year, "ratios": ratios, "financials": f})
-
-# -------------------------
-# ⚖️ /compare - 기업비교
-# -------------------------
-@app.route("/compare")
-def compare():
-    corp1 = request.args.get("corp1")
-    corp2 = request.args.get("corp2")
-    year = request.args.get("year", "2025")
-
-    if not corp1 or not corp2:
-        return jsonify({"error": "Missing corp codes"}), 400
-
-    d1 = fetch_dart_data(corp1, year)
-    d2 = fetch_dart_data(corp2, year)
-
-    if not d1 or not d2:
-        return jsonify({"error": "Failed to fetch data"}), 500
-
-    f1, f2 = extract_financials(d1), extract_financials(d2)
-    r1, r2 = calculate_ratios(f1), calculate_ratios(f2)
-
-    return jsonify({
-        "year": year,
-        "company_1": {"corp_code": corp1, "ratios": r1, "financials": f1},
-        "company_2": {"corp_code": corp2, "ratios": r2, "financials": f2}
-    })
-
-@app.route("/")
-def home():
-    return jsonify({
-        "status": "You Finance It – Proxy v2",
-        "endpoints": ["/dart", "/ratios", "/compare"]
-    })
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    if not corp_code or not bsns_year:
+        return jsonify({"error": "Missing par
