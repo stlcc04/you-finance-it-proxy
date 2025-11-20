@@ -14,6 +14,17 @@ DART_KEY = os.getenv("DART_API_KEY")
 # ----------------------------------------
 def fetch_dart_data(corp_code, bsns_year, reprt_code="11013"):
     url = "https://opendart.fss.or.kr/api/fnlttMultiAcnt.xml"
+def fetch_xbrl_document(rcept_no):
+    """공시번호(rcept_no)로 XBRL 원문 불러오기"""
+    url = f"https://opendart.fss.or.kr/api/document.xml?crtfc_key={DART_KEY}&rcept_no={rcept_no}"
+    res = requests.get(url)
+    if res.status_code != 200:
+        return None
+    try:
+        xbrl = xmltodict.parse(res.text)
+        return xbrl
+    except:
+        return None
     params = {
         "crtfc_key": DART_KEY,
         "corp_code": corp_code,
@@ -69,7 +80,7 @@ def get_ratios():
     if not corp_code or not bsns_year:
         return jsonify({"error": "Missing parameters"}), 400
 
-    data = fetch_dart_data(corp_code, bsns_year, reprt_code)
+data = fetch_xbrl_document("20240318000502")
     if not data:
         return jsonify({"error": "No data"}), 500
 
