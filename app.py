@@ -67,4 +67,45 @@ def get_ratios():
     reprt_code = request.args.get("reprt_code", "11013")
 
     if not corp_code or not bsns_year:
-        return jsonify({"error": "Missing par
+        return jsonify({"error": "Missing parameters"}), 400
+
+    data = fetch_dart_data(corp_code, bsns_year, reprt_code)
+    if not data:
+        return jsonify({"error": "No data"}), 500
+
+    f = extract_financials(data)
+    ratios = calculate_ratios(f)
+    return jsonify({"corp_code": corp_code, "year": bsns_year, "financials": f, "ratios": ratios})
+
+# ----------------------------------------
+# 🏢 /compare - 두 기업 비교
+# ----------------------------------------
+@app.route("/compare")
+def compare():
+    corp1 = request.args.get("corp1")
+    corp2 = request.args.get("corp2")
+    year = request.args.get("year", "2024")
+    reprt_code = request.args.get("reprt_code", "11014")
+
+    d1 = fetch_dart_data(corp1, year, reprt_code)
+    d2 = fetch_dart_data(corp2, year, reprt_code)
+    if not d1 or not d2:
+        return jsonify({"error": "Failed to fetch data"}), 500
+
+    f1, f2 = extract_financials(d1), extract_financials(d2)
+    r1, r2 = calculate_ratios(f1), calculate_ratios(f2)
+    return jsonify({
+        "year": year,
+        "company_1": {"corp_code": corp1, "ratios": r1, "financials": f1},
+        "company_2": {"corp_code": corp2, "ratios": r2, "financials": f2}
+    })
+
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "You Finance It – Proxy v3 (XBRL Enabled)",
+        "endpoints": ["/ratios", "/compare"]
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
